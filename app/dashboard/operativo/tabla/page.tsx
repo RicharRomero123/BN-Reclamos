@@ -7,7 +7,18 @@ import {
   Ticket as TicketIcon, RefreshCw, Edit3, X, Save, Eye, Copy, AlertTriangle, ChevronDown, Calendar, Fingerprint, Search 
 } from 'lucide-react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://service-bn-8.onrender.com/api';
+// URL base proporcionada
+const API_URL = 'https://unbased-pallidly-donn.ngrok-free.dev/api';
+
+// --- CORRECCIÓN 1: INSTANCIA DE AXIOS ---
+// Es OBLIGATORIO usar esto con ngrok-free para evitar que devuelva HTML y rompa el JSON
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true' // <--- ESTO EVITA EL ERROR DE NGROK
+  }
+});
 
 export default function TablaOperativoPage() {
   // --- ESTADOS PRINCIPALES ---
@@ -15,13 +26,13 @@ export default function TablaOperativoPage() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
-  const [filtro, setFiltro] = useState('todos'); // Filtro de estado (Backend)
+  const [filtro, setFiltro] = useState('todos'); 
   const [loading, setLoading] = useState(false);
 
-  // --- NUEVO: ESTADOS PARA BÚSQUEDA FRONTEND ---
+  // --- ESTADOS PARA BÚSQUEDA FRONTEND ---
   const [dniBusqueda, setDniBusqueda] = useState('');
   const [fechaBusqueda, setFechaBusqueda] = useState('');
-  const [isSearchMode, setIsSearchMode] = useState(false); // Para saber si estamos filtrando en front
+  const [isSearchMode, setIsSearchMode] = useState(false); 
 
   // --- ESTADOS DE MODALES Y ACCIONES ---
   const [modalType, setModalType] = useState<'view' | 'edit' | 'confirm' | null>(null);
@@ -39,24 +50,31 @@ export default function TablaOperativoPage() {
   const inputToBackendFormat = (dateStr: string) => {
     if (!dateStr) return '';
     const [year, month, day] = dateStr.split('-');
-    return `${day}-${month}-${year}`; // Retorna DD-MM-YYYY
+    return `${day}-${month}-${year}`; 
   };
 
-  // --- 1. CARGA DE DATOS NORMAL (Paginación Backend) ---
+  // --- 1. CARGA DE DATOS NORMAL ---
   const fetchReclamos = useCallback(async () => {
-    // Si estamos en modo búsqueda manual, no ejecutamos la paginación automática
     if (isSearchMode) return; 
 
     setLoading(true);
     try {
-      let url = `${API_URL}/reclamos?page=${page}&size=10`;
+      // Usamos la ruta relativa porque 'api' ya tiene la baseURL
+      let url = `/reclamos?page=${page}&size=10`;
       if (filtro !== 'todos') url += `&completado=${filtro === 'true'}`;
-      const res = await axios.get(url);
-      setData(res.data.content);
-      setTotalPages(res.data.totalPages);
-      setTotalElements(res.data.totalElements);
+      
+      // Usamos 'api' en lugar de 'axios' directo
+      const res = await api.get(url);
+      
+      // --- CORRECCIÓN 2: PROTECCIÓN DE DATOS ---
+      // Si content es undefined, usamos un array vacío para evitar el crash
+      setData(res.data?.content || []); 
+      setTotalPages(res.data?.totalPages || 0);
+      setTotalElements(res.data?.totalElements || 0);
+
     } catch (error) { 
-      console.error(error); 
+      console.error("Error cargando datos:", error);
+      setData([]); // En caso de error, aseguramos que sea un array
     } finally { 
       setLoading(false); 
     }
@@ -64,32 +82,25 @@ export default function TablaOperativoPage() {
 
   useEffect(() => { fetchReclamos(); }, [fetchReclamos]);
 
-  // --- 2. NUEVO: CARGA MASIVA Y FILTRADO (Frontend Search) ---
+  // --- 2. CARGA MASIVA Y FILTRADO ---
   const buscarEnFront = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Si no hay nada escrito, no hacemos nada (o podrías recargar normal)
     if (!dniBusqueda && !fechaBusqueda) return;
 
     setLoading(true);
     try {
-      // a) Traemos "toda" la data (limit muy alto, ej: 10000)
-      // Nota: Mantenemos el filtro de estado (pend/completado) si lo deseas, o lo quitas del URL
-      let url = `${API_URL}/reclamos?page=0&size=10000`; 
+      let url = `/reclamos?page=0&size=10000`; 
       if (filtro !== 'todos') url += `&completado=${filtro === 'true'}`;
 
-      const res = await axios.get(url);
-      const allData = res.data.content || [];
+      const res = await api.get(url); // Usamos api
+      const allData = res.data?.content || []; // Protección aquí también
 
-      // b) Filtramos en Javascript
       const resultadosFiltrados = allData.filter((item: any) => {
-        // Filtro DNI (si el usuario escribió algo)
         const matchDni = dniBusqueda 
-          ? item.documentoCliente.includes(dniBusqueda) 
+          ? item.documentoCliente?.includes(dniBusqueda) 
           : true;
 
-        // Filtro Fecha (si el usuario seleccionó fecha)
-        // Convertimos el input (YYYY-MM-DD) al formato del back (DD-MM-YYYY) para comparar
         const fechaFormateada = inputToBackendFormat(fechaBusqueda);
         const matchFecha = fechaBusqueda 
           ? item.fechaTrx === fechaFormateada 
@@ -98,15 +109,15 @@ export default function TablaOperativoPage() {
         return matchDni && matchFecha;
       });
 
-      // c) Actualizamos la tabla con la data filtrada
       setData(resultadosFiltrados);
       setTotalElements(resultadosFiltrados.length);
-      setTotalPages(1); // En búsqueda local, todo está en una "página"
-      setIsSearchMode(true); // Activamos la bandera
+      setTotalPages(1); 
+      setIsSearchMode(true); 
 
     } catch (error) {
       console.error("Error buscando:", error);
       alert("Error al buscar datos masivos.");
+      setData([]);
     } finally {
       setLoading(false);
     }
@@ -116,9 +127,8 @@ export default function TablaOperativoPage() {
   const limpiarBusqueda = () => {
     setDniBusqueda('');
     setFechaBusqueda('');
-    setIsSearchMode(false); // Apagamos modo búsqueda
-    setPage(0); // Volvemos a página 0
-    // Al cambiar isSearchMode a false, el useEffect disparará fetchReclamos automáticamente
+    setIsSearchMode(false); 
+    setPage(0); 
   };
 
 
@@ -139,17 +149,14 @@ export default function TablaOperativoPage() {
     setIsSaving(true);
     try {
       if (pendingAction.type === 'status') {
-        await axios.patch(`${API_URL}/reclamos/${pendingAction.data.id}/estado?estado=${pendingAction.data.nuevoEstado}`);
+        await api.patch(`/reclamos/${pendingAction.data.id}/estado?estado=${pendingAction.data.nuevoEstado}`);
       } else {
         const payload = { ...pendingAction.data, fechaTrx: inputToBackendFormat(pendingAction.data.fechaTrx) };
-        await axios.put(`${API_URL}/reclamos/${payload.id}/gestionar`, payload);
+        await api.put(`/reclamos/${payload.id}/gestionar`, payload);
       }
       setModalType(null);
-      // Decisión: ¿Recargamos todo o mantenemos la búsqueda?
-      // Por simplicidad, recargamos la vista normal para ver los cambios frescos
+      
       if (isSearchMode) {
-         // Opción A: Re-ejecutar búsqueda (puede ser lento)
-         // Opción B: Salir de búsqueda
          limpiarBusqueda(); 
       } else {
          fetchReclamos();
@@ -162,6 +169,7 @@ export default function TablaOperativoPage() {
   };
 
   const handleTicketChange = (index: number, field: string, value: any) => {
+    if (!selectedReclamo || !selectedReclamo.tickets) return;
     const updatedTickets = [...selectedReclamo.tickets];
     updatedTickets[index] = { ...updatedTickets[index], [field]: value };
     setSelectedReclamo({ ...selectedReclamo, tickets: updatedTickets });
@@ -170,10 +178,10 @@ export default function TablaOperativoPage() {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col min-h-[600px]">
       
-      {/* HEADER CLARO CON FILTROS Y BÚSQUEDA */}
+      {/* HEADER */}
       <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-4">
         
-        {/* FILA SUPERIOR: Totales y Filtro Estado */}
+        {/* Totales y Filtro */}
         <div className="flex flex-wrap justify-between items-center gap-4">
             <div className="flex items-center gap-3">
               <div className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-2 shadow-sm">
@@ -199,10 +207,9 @@ export default function TablaOperativoPage() {
             </div>
         </div>
 
-        {/* --- NUEVO: BARRA DE BÚSQUEDA (FORMULARIO) --- */}
+        {/* BUSQUEDA */}
         <form onSubmit={buscarEnFront} className="flex flex-wrap gap-3 items-end pt-2 border-t border-slate-200">
            
-           {/* Input DNI */}
            <div className="flex-1 min-w-[150px]">
              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Buscar por DNI/Doc</label>
              <div className="relative">
@@ -217,7 +224,6 @@ export default function TablaOperativoPage() {
              </div>
            </div>
 
-           {/* Input Fecha */}
            <div className="flex-1 min-w-[150px]">
              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Filtrar por Fecha</label>
              <div className="relative">
@@ -231,7 +237,6 @@ export default function TablaOperativoPage() {
              </div>
            </div>
 
-           {/* Botones Buscar / Limpiar */}
            <div className="flex gap-2">
               <button 
                 type="submit"
@@ -259,7 +264,7 @@ export default function TablaOperativoPage() {
         )}
       </div>
 
-      {/* TABLA CLARA */}
+      {/* TABLA */}
       <div className="flex-grow overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
@@ -270,8 +275,10 @@ export default function TablaOperativoPage() {
               <th className="px-6 py-4 text-center">Acciones</th>
             </tr>
           </thead>
+          {/* --- CORRECCIÓN 3: OPTIONAL CHAINING EN JSX --- */}
+          {/* Añadimos 'data?.length' por si acaso 'data' llegara a ser undefined */}
           <tbody className="divide-y divide-slate-100 text-slate-600">
-            {data.length > 0 ? (
+            {data && data.length > 0 ? (
               data.map((item) => (
                 <tr key={item.id} className="hover:bg-blue-50/40 transition-all group">
                   <td className="px-6 py-4">
@@ -283,7 +290,6 @@ export default function TablaOperativoPage() {
                     <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 rounded font-bold uppercase">{item.tipoDocumento}</span>
                   </td>
                   <td className="px-6 py-4">
-                    {/* DROPDOWN DE ESTADO */}
                     <div className="relative inline-block text-left group/drop z-10">
                       <button className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-black text-[10px] border transition-all shadow-sm ${
                         item.completado ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'
@@ -327,7 +333,7 @@ export default function TablaOperativoPage() {
             ) : (
                <tr>
                  <td colSpan={4} className="px-6 py-12 text-center text-slate-400 font-medium">
-                    No se encontraron registros {isSearchMode && 'con estos filtros'}
+                   {loading ? 'Cargando datos...' : `No se encontraron registros ${isSearchMode ? 'con estos filtros' : ''}`}
                  </td>
                </tr>
             )}
@@ -335,8 +341,7 @@ export default function TablaOperativoPage() {
         </table>
       </div>
 
-      {/* PAGINACIÓN CLARA */}
-      {/* Ocultamos paginación si estamos buscando en modo front, ya que todo está cargado */}
+      {/* PAGINACIÓN */}
       {!isSearchMode && (
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-slate-500">
           <span className="text-xs font-bold">Página {page + 1} de {totalPages}</span>
@@ -348,7 +353,6 @@ export default function TablaOperativoPage() {
       )}
 
       {/* --- MODALES --- */}
-      {/* ... (Tus modales de confirmación, view y edit siguen exactamente igual abajo) ... */}
       
       {/* MODAL 1: CONFIRMACIÓN */}
       {modalType === 'confirm' && (
@@ -427,33 +431,33 @@ export default function TablaOperativoPage() {
 
               {/* Tickets */}
               <div className="space-y-4">
-                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1"><TicketIcon className="h-3 w-3"/> Gestión de Tickets Asociados</label>
-                 {selectedReclamo.tickets?.map((t: any, idx: number) => (
-                   <div key={t.id} className="p-5 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-4 shadow-sm">
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Nro Ticket</label>
-                        <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.nroTicket} onChange={(e) => handleTicketChange(idx, 'nroTicket', e.target.value)} />
-                     </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Importe</label>
-                        <input type="number" className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.importe} onChange={(e) => handleTicketChange(idx, 'importe', parseFloat(e.target.value))} />
-                     </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Estado</label>
-                        <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.estadoTicket} onChange={(e) => handleTicketChange(idx, 'estadoTicket', e.target.value)} />
-                     </div>
-                     <div className="md:col-span-3 flex gap-4">
-                        <div className="flex-1 space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">ID Único Operación</label>
-                            <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none font-mono" value={t.idUnico} onChange={(e) => handleTicketChange(idx, 'idUnico', e.target.value)} />
-                        </div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1"><TicketIcon className="h-3 w-3"/> Gestión de Tickets Asociados</label>
+                  {selectedReclamo.tickets?.map((t: any, idx: number) => (
+                    <div key={t.id} className="p-5 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-4 shadow-sm">
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Nro Ticket</label>
+                         <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.nroTicket} onChange={(e) => handleTicketChange(idx, 'nroTicket', e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Importe</label>
+                         <input type="number" className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.importe} onChange={(e) => handleTicketChange(idx, 'importe', parseFloat(e.target.value))} />
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-bold text-slate-400 uppercase">Estado</label>
+                         <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.estadoTicket} onChange={(e) => handleTicketChange(idx, 'estadoTicket', e.target.value)} />
+                      </div>
+                      <div className="md:col-span-3 flex gap-4">
                          <div className="flex-1 space-y-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Cód. Devolución</label>
-                            <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.codDevolucion} onChange={(e) => handleTicketChange(idx, 'codDevolucion', e.target.value)} />
-                        </div>
-                     </div>
-                   </div>
-                 ))}
+                             <label className="text-[10px] font-bold text-slate-400 uppercase">ID Único Operación</label>
+                             <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none font-mono" value={t.idUnico} onChange={(e) => handleTicketChange(idx, 'idUnico', e.target.value)} />
+                         </div>
+                          <div className="flex-1 space-y-1">
+                             <label className="text-[10px] font-bold text-slate-400 uppercase">Cód. Devolución</label>
+                             <input className="w-full p-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none" value={t.codDevolucion} onChange={(e) => handleTicketChange(idx, 'codDevolucion', e.target.value)} />
+                         </div>
+                      </div>
+                    </div>
+                  ))}
               </div>
             </div>
             <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end gap-4 rounded-b-2xl">

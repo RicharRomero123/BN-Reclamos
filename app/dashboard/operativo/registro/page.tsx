@@ -4,7 +4,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import { Plus, Trash2, Save, CheckCircle2 } from 'lucide-react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://service-bn-8.onrender.com/api';
+const API_URL =  'https://service-bn-8.onrender.com/api';
 
 export default function OperativoPage() {
   // Estado para la cabecera del reclamo
